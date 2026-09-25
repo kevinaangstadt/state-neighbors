@@ -43,6 +43,10 @@ The visualization mirrors the algorithm in the companion Java project:
 - [`StateNeighbors/src/State.java`](StateNeighbors/src/State.java) — State object with `visited`, `prev`, and neighbor list
 - [`StateNeighbors/contiguous-usa.txt`](StateNeighbors/contiguous-usa.txt) — Adjacency data (107 edges, contiguous US)
 
+## Credits
+
+Built using the [Qwen3.6-35B-A3B](https://qwenlm.github.io/) model with Claude Code tooling.
+
 ## License
 
 BSD 3-Clause License — see [LICENSE](LICENSE)
