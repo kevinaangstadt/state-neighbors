@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -e
+
+# Ensure managed-settings.json exists in workspace
+if [ ! -f "managed-settings.json" ]; then
+  echo "Error: managed-settings.json not found in current directory."
+  exit 1
+fi
+
+# make sure we are on the latest version of claude code
+docker pull docker/sandbox-templates:claude-code
+
+docker run -it --rm \
+  -v "$(pwd)":/workspace \
+  -v "$(pwd)/.claude-home:/home/agent/.claude" \
+  -v "$(pwd)/managed-settings.json:/etc/claude-code/managed-settings.json:ro" \
+  -w /workspace \
+  docker/sandbox-templates:claude-code claude --verbose "$@"

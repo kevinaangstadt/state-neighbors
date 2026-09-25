@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State Graph Search — BFS &amp; DFS Visualization</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+#graph {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+/* ── Control Panel ── */
+#controls {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 14px;
+  padding: 20px;
+  min-width: 250px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 10;
+}
+#controls h2 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  color: #f1f5f9;
+  letter-spacing: 0.02em;
+}
+.ctrl-group {
+  margin-bottom: 12px;
+}
+.ctrl-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.ctrl-group select, .ctrl-group input[type="range"] {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+.ctrl-group select:hover { border-color: #60a5fa; }
+.ctrl-group select:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(96,165,250,0.2); }
+
+/* Mode toggle */
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #334155;
+}
+.mode-toggle button {
+  flex: 1;
+  padding: 7px 8px;
+  background: #1e293b;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mode-toggle button.active {
+  background: #3b82f6;
+  color: #fff;
+}
+.mode-toggle button:hover:not(.active) { background: #334155; }
+
+/* Buttons */
+.btn {
+  width: 100%;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-primary {
+  background: #3b82f6;
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) { background: #2563eb; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary {
+  background: #1e293b;
+  color: #94a3b8;
+  margin-top: 8px;
+  border: 1px solid #334155;
+}
+.btn-secondary:hover { background: #334155; color: #e2e8f0; }
+
+/* Speed slider */
+.speed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.speed-row input[type="range"] {
+  flex: 1;
+  padding: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #334155;
+  border-radius: 2px;
+  border: none;
+}
+.speed-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #60a5fa;
+  cursor: pointer;
+}
+.speed-val {
+  font-size: 11px;
+  color: #64748b;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ── Info panel (bottom) ── */
+.info-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 12px;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 10;
+  white-space: nowrap;
+}
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.info-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.2);
+}
+.info-dot.start { background: #f59e0b; }
+.info-dot.end { background: #ef4444; }
+.info-dot.visited { background: #3b82f6; }
+.info-dot.current { background: #f97316; }
+.info-dot.path { background: #22c55e; }
+.info-label { color: #94a3b8; font-size: 11px; }
+.info-value { color: #f1f5f9; font-weight: 600; }
+#status { color: #64748b; font-size: 13px; }
+
+/* State abbreviation labels with halo for legibility over any fill */
+.state-label {
+  paint-order: stroke fill;
+  stroke: #0f172a;
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+}
+
+/* ── Tooltip ── */
+#tooltip {
+  position: absolute;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+  z-index: 20;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+/* ── Path list ── */
+#path-list {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 14px;
+  padding: 16px 20px;
+  min-width: 160px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  z-index: 10;
+  display: none;
+}
+#path-list h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 10px;
+}
+#path-list ol {
+  font-size: 12px;
+  color: #94a3b8;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+#path-list li.path-node {
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+#path-list li.path-node.active {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+  font-weight: 600;
+}
+#path-list li.path-node::marker {
+  color: #475569;
+}
+#path-list li.path-node.active::marker {
+  color: #22c55e;
+}
+</style>
+</head>
+<body>
+
+<svg id="graph"></svg>
+
+<div id="controls">
+  <h2>Graph Search</h2>
+
+  <div class="ctrl-group">
+    <label>Start State</label>
+    <select id="startState"></select>
+  </div>
+  <div class="ctrl-group">
+    <label>End State</label>
+    <select id="endState"></select>
+  </div>
+
+  <div class="ctrl-group">
+    <label>Traversal Mode</label>
+    <div class="mode-toggle" id="algoToggle">
+      <button class="active" data-val="dfs">Stack (DFS)</button>
+      <button data-val="bfs">Queue (BFS)</button>
+    </div>
+  </div>
+
+  <div class="ctrl-group">
+    <label>Search Mode</label>
+    <div class="mode-toggle" id="modeToggle">
+      <button data-val="search">Search Only</button>
+      <button class="active" data-val="path">Search + Path</button>
+    </div>
+  </div>
+
+  <div class="ctrl-group">
+    <label>Speed</label>
+    <div class="speed-row">
+      <input type="range" id="speed" min="1" max="10" value="5">
+      <span class="speed-val" id="speedVal">5×</span>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="runBtn">▶ Run Search</button>
+  <button class="btn btn-secondary" id="resetBtn">↺ Reset</button>
+</div>
+
+<div class="info-bar">
+  <div class="info-item">
+    <div class="info-dot start"></div>
+    <div><div class="info-label">Start</div><div class="info-value" id="startInfo">—</div></div>
+  </div>
+  <div class="info-item">
+    <div class="info-dot end"></div>
+    <div><div class="info-label">End</div><div class="info-value" id="endInfo">—</div></div>
+  </div>
+  <div class="info-item">
+    <div class="info-dot visited"></div>
+    <div><div class="info-label">Visited</div><div class="info-value" id="visitedCount">0</div></div>
+  </div>
+  <div class="info-item">
+    <div class="info-dot current"></div>
+    <div><div class="info-label">Current</div><div class="info-value" id="currentInfo">—</div></div>
+  </div>
+  <div id="status">Ready</div>
+</div>
+
+<div id="path-list">
+  <h3>Path Found</h3>
+  <ol id="path-ol"></ol>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- Debug overlay (hidden in production, remove to hide) -->
+<div id="debug-overlay" style="position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;z-index:999">
+  <div id="debug-status" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#4ade80;padding:4px 12px;border-radius:6px;font-size:12px;font-family:monospace;white-space:nowrap"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// Adjacency (from contiguous-usa.txt)
+// ═══════════════════════════════════════════════════════
+const ADJACENCY = [
+  ["AL","FL"],["AL","GA"],["AL","MS"],["AL","TN"],
+  ["AR","LA"],["AR","MO"],["AR","MS"],["AR","OK"],["AR","TN"],["AR","TX"],
+  ["AZ","CA"],["AZ","NM"],["AZ","NV"],["AZ","UT"],
+  ["CA","NV"],["CA","OR"],
+  ["CO","KS"],["CO","NE"],["CO","NM"],["CO","OK"],["CO","UT"],["CO","WY"],
+  ["CT","MA"],["CT","NY"],["CT","RI"],
+  ["DC","MD"],["DC","VA"],
+  ["DE","MD"],["DE","NJ"],["DE","PA"],
+  ["FL","GA"],
+  ["GA","NC"],["GA","SC"],["GA","TN"],
+  ["IA","IL"],["IA","MN"],["IA","MO"],["IA","NE"],["IA","SD"],["IA","WI"],
+  ["ID","MT"],["ID","NV"],["ID","OR"],["ID","UT"],["ID","WA"],["ID","WY"],
+  ["IL","IN"],["IL","KY"],["IL","MO"],["IL","WI"],
+  ["IN","KY"],["IN","MI"],["IN","OH"],
+  ["KS","MO"],["KS","NE"],["KS","OK"],
+  ["KY","MO"],["KY","OH"],["KY","TN"],["KY","VA"],["KY","WV"],
+  ["LA","MS"],["LA","TX"],
+  ["MA","NH"],["MA","NY"],["MA","RI"],["MA","VT"],
+  ["MD","PA"],["MD","VA"],["MD","WV"],
+  ["ME","NH"],
+  ["MI","OH"],["MI","WI"],
+  ["MN","ND"],["MN","SD"],["MN","WI"],
+  ["MO","NE"],["MO","OK"],["MO","TN"],
+  ["MS","TN"],
+  ["MT","ND"],["MT","SD"],["MT","WY"],
+  ["NC","SC"],["NC","TN"],["NC","VA"],
+  ["ND","SD"],
+  ["NE","SD"],["NE","WY"],
+  ["NH","VT"],
+  ["NJ","NY"],["NJ","PA"],
+  ["NM","OK"],["NM","TX"],
+  ["NV","OR"],["NV","UT"],
+  ["NY","PA"],["NY","VT"],
+  ["OH","PA"],["OH","WV"],
+  ["OK","TX"],
+  ["OR","WA"],
+  ["PA","WV"],
+  ["SD","WY"],
+  ["TN","VA"],
+  ["UT","WY"],
+  ["VA","WV"],
+];
+
+// ═══════════════════════════════════════════════════════
+// FIPS code → USPS abbreviation (for us-atlas TopoJSON mapping)
+// us-atlas features have numeric FIPS IDs, not USPS codes
+// ═══════════════════════════════════════════════════════
+const FIPS_TO_USPS = {
+  "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT",
+  "10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL",
+  "18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD",
+  "25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE",
+  "32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND",
+  "39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD",
+  "47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV",
+  "55":"WI","56":"WY"
+};
+
+// ═══════════════════════════════════════════════════════
+// Build adjacency map
+// ═══════════════════════════════════════════════════════
+const adjMap = {};
+ADJACENCY.forEach(([a, b]) => {
+  (adjMap[a] = adjMap[a] || []).push(b);
+  (adjMap[b] = adjMap[b] || []).push(a);
+});
+
+// All 51 state codes
+const ALL_CODES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI",
+  "ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN",
+  "MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH",
+  "OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA",
+  "WV","WI","WY"
+];
+
+// ═══════════════════════════════════════════════════════
+// SVG Setup
+// ═══════════════════════════════════════════════════════
+const svg = d3.select("#graph");
+const width = window.innerWidth;
+const height = window.innerHeight;
+svg.attr("width", width).attr("height", height);
+
+const defs = svg.append("defs");
+
+// Glow filter for current node label
+const glow = defs.append("filter").attr("id", "glow");
+glow.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "blur");
+const glowMerge = glow.append("feMerge");
+glowMerge.append("feMergeNode").attr("in", "blur");
+glowMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
+// Root group for zoom transform
+const g = svg.append("g");
+
+// ═══════════════════════════════════════════════════════
+// 5 explicit SVG layer groups — DOM order = z-index
+// ═══════════════════════════════════════════════════════
+const gFills    = g.append("g").attr("id", "layer-fills");
+const gStrokes  = g.append("g").attr("id", "layer-strokes");
+const gHover    = g.append("g").attr("id", "layer-hover");
+const gOutlines = g.append("g").attr("id", "layer-outlines");
+const gLabels   = g.append("g").attr("id", "layer-labels");
+
+// Zoom transforms the root group g, which contains all layers
+const zoom = d3.zoom()
+  .scaleExtent([0.5, 8])
+  .on("zoom", (e) => g.attr("transform", e.transform));
+svg.call(zoom);
+
+// State color scales
+const STATE_FILL_BASE = "#1e293b";
+const STATE_STROKE_BASE = "#334155";
+const COLOR_VISITED = "#3b82f6";
+const COLOR_CURRENT = "#f97316";
+const COLOR_PATH = "#22c55e";
+
+// Visual state
+let discoveredSet = new Set();
+let currentNode = null;
+let pathSet = new Set();
+let mapFeatures = null;
+let geoPathFn = null; // d3.geoPath function
+let fillPaths = null;  // Layer 1: state fills only (no stroke) — bottom z-index
+let strokePaths = null; // Layer 2: state strokes only (no fill) — above fills
+let stateLabels = null; // Layer 5: labels — top z-index
+let nodeMap = {}; // code → {x, y} centroids, radius
+let pathCodes = []; // current search path
+let isRunning = false;
+let projection = null;
+
+// State full names for tooltips
+const stateNames = {
+  "AL":"Alabama","AK":"Alaska","AZ":"Arizona","AR":"Arkansas","CA":"California",
+  "CO":"Colorado","CT":"Connecticut","DE":"Delaware","DC":"District of Columbia",
+  "FL":"Florida","GA":"Georgia","HI":"Hawaii","ID":"Idaho","IL":"Illinois",
+  "IN":"Indiana","IA":"Iowa","KS":"Kansas","KY":"Kentucky","LA":"Louisiana",
+  "ME":"Maine","MD":"Maryland","MA":"Massachusetts","MI":"Michigan","MN":"Minnesota",
+  "MS":"Mississippi","MO":"Missouri","MT":"Montana","NE":"Nebraska","NV":"Nevada",
+  "NH":"New Hampshire","NJ":"New Jersey","NM":"New Mexico","NY":"New York",
+  "NC":"North Carolina","ND":"North Dakota","OH":"Ohio","OK":"Oklahoma","OR":"Oregon",
+  "PA":"Pennsylvania","RI":"Rhode Island","SC":"South Carolina","SD":"South Dakota",
+  "TN":"Tennessee","TX":"Texas","UT":"Utah","VT":"Vermont","VA":"Virginia",
+  "WA":"Washington","WV":"West Virginia","WI":"Wisconsin","WY":"Wyoming"
+};
+
+// ═══════════════════════════════════════════════════════
+// Label offset map for non-convex states (centroid → readable text)
+// ═══════════════════════════════════════════════════════
+const LABEL_OFFSETS = {
+  "FL": [15, 8],    // Into the peninsula body away from the Gulf
+  "MI": [10, 24],   // Center on the Lower Peninsula rather than Lake Michigan
+  "LA": [-6, -4],   // Shift inland from the delta
+  "MD": [10, -4],   // Nudge east of DC and Chesapeake inlet
+  "CA": [-6, 6],    // Balance along the central valley
+  "NJ": [2, 0],
+  "DE": [4, 0],
+  "RI": [2, 0]
+};
+
+function getLabelCoordinates(d) {
+  const centroid = geoPathFn.centroid(d);
+  if (!centroid || isNaN(centroid[0]) || isNaN(centroid[1])) return [0, 0];
+  const code = d.properties.USPS;
+  const offset = LABEL_OFFSETS[code] || [0, 0];
+  return [centroid[0] + offset[0], centroid[1] + offset[1]];
+}
+
+// ═══════════════════════════════════════════════════════
+// UI Setup
+// ═══════════════════════════════════════════════════════
+const startSelect = d3.select("#startState");
+const endSelect = d3.select("#endState");
+const sorted = [...ALL_CODES].sort((a, b) => (stateNames[a]||a).localeCompare(stateNames[b]||b));
+sorted.forEach(code => {
+  const name = stateNames[code] || code;
+  startSelect.append("option").attr("value", code).text(`${name} (${code})`);
+  endSelect.append("option").attr("value", code).text(`${name} (${code})`);
+});
+document.getElementById("startState").value = "WA";
+document.getElementById("endState").value = "FL";
+
+function getSelectValue(selector) {
+  return d3.select(selector).node().value;
+}
+
+function updateInfoBar() {
+  d3.select("#startInfo").text(getSelectValue("#startState"));
+  d3.select("#endInfo").text(getSelectValue("#endState"));
+}
+
+function setupToggle(selector, callback) {
+  const container = d3.select(selector);
+  container.selectAll("button")
+    .on("click", function() {
+      container.selectAll("button").classed("active", false);
+      d3.select(this).classed("active", true);
+      callback(d3.select(this).attr("data-val"));
+    });
+}
+
+let algoMode = "dfs";
+let searchMode = "path";
+setupToggle("#algoToggle", val => { algoMode = val; });
+setupToggle("#modeToggle", val => { searchMode = val; });
+
+const speedSlider = d3.select("#speed");
+const speedVal = d3.select("#speedVal");
+speedSlider.on("input", function() {
+  const v = parseInt(this.value);
+  speedVal.text(`${v}×`);
+});
+
+function getDelay() {
+  const v = parseInt(speedSlider.property("value"));
+  return Math.round(850 - v * 80);
+}
+
+// ═══════════════════════════════════════════════════════
+// Visualization helpers
+// ═══════════════════════════════════════════════════════
+function getStateFill(code) {
+  if (pathSet.has(code)) return COLOR_PATH;
+  if (code === currentNode) return COLOR_CURRENT;
+  if (discoveredSet.has(code)) return COLOR_VISITED;
+  return STATE_FILL_BASE;
+}
+
+function getStateStroke(code) {
+  // Keep stroke subtle — visual distinction comes from fill color, not stroke.
+  // This prevents stroke overlap from obscuring neighboring state fills.
+  if (pathSet.has(code)) return "#4ade80";   // subtle green
+  if (code === currentNode) return "#fb923c"; // subtle orange
+  if (discoveredSet.has(code)) return "#60a5fa"; // subtle blue
+  return STATE_STROKE_BASE;
+}
+
+function applyStateStyles(forceInstant) {
+  if (!fillPaths) return;
+  const sel = (forceInstant || isRunning) ? fillPaths : fillPaths.transition().duration(300);
+  sel.attr("fill", d => getStateFill(d.properties.USPS));
+
+  // Stroke layer: independent from fills, renders above them in gStrokes
+  if (!strokePaths) return;
+  const strokeSel = (forceInstant || isRunning) ? strokePaths : strokePaths.transition().duration(300);
+  strokeSel
+    .attr("stroke", d => {
+      const c = d.properties.USPS;
+      if (pathSet.has(c)) return d3.color(COLOR_PATH).brighter(0.5);
+      if (c === currentNode) return d3.color(COLOR_CURRENT).brighter(0.5);
+      return STATE_STROKE_BASE;
+    })
+    .attr("stroke-width", 1.5);
+}
+
+// ═══════════════════════════════════════════════════════
+// Tooltip
+// ═══════════════════════════════════════════════════════
+const tooltip = d3.select("#tooltip");
+
+// ═══════════════════════════════════════════════════════
+// Debug
+// ═══════════════════════════════════════════════════════
+function setDebug(msg) {
+  d3.select("#debug-status").text(msg);
+}
+
+// ═══════════════════════════════════════════════════════
+// Load map data and render
+// ═══════════════════════════════════════════════════════
+async function init() {
+  if (typeof topojson === "undefined") {
+    setDebug("ERROR: topojson not loaded!");
+    setStatus("topojson-client failed to load");
+    d3.select("#runBtn").property("disabled", true);
+    return;
+  }
+  try {
+    setDebug("Fetching map data...");
+    const response = await fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json");
+    if (!response.ok) throw new Error("Network error");
+    const us = await response.json();
+    setDebug("Fetched " + JSON.stringify(us).length + " bytes");
+    renderMap(us);
+  } catch (e) {
+    setDebug("ERROR: " + e.message);
+    setStatus(`Map load failed: ${e.message}`);
+    d3.select("#runBtn").property("disabled", true);
+  }
+}
+
+function renderMap(us) {
+  setDebug("Converting TopoJSON...");
+  // Convert TopoJSON to GeoJSON features
+  mapFeatures = topojson.feature(us, us.objects.states);
+
+  setDebug("Features: " + mapFeatures.features.length);
+
+  // us-atlas features have string FIPS IDs (e.g. "06") and {name: "California"}.
+  // No USPS abbreviation is stored. Map FIPS → USPS for each feature.
+  mapFeatures.features.forEach(f => {
+    const fipsStr = f.id != null ? String(f.id).padStart(2, '0') : null;
+    if (fipsStr && FIPS_TO_USPS[fipsStr]) {
+      f.properties.USPS = FIPS_TO_USPS[fipsStr];
+    } else if (f.properties && f.properties.name) {
+      // fallback: reverse lookup from full name
+      const code = Object.keys(stateNames).find(k => stateNames[k] === f.properties.name);
+      if (code) f.properties.USPS = code;
+    }
+  });
+
+  // Count mapped features
+  const mappedCount = mapFeatures.features.filter(f => f.properties.USPS).length;
+  setDebug("Features: " + mapFeatures.features.length + ", Mapped: " + mappedCount);
+
+  if (mappedCount === 0) {
+    setDebug("ERROR: No USPS codes mapped! Check FIPS_TO_USPS");
+    setStatus("USPS mapping failed");
+    d3.select("#runBtn").property("disabled", true);
+    return;
+  }
+
+  // Build projection
+  projection = d3.geoAlbersUsa()
+    .fitExtent([[20, 20], [width - 20, height - 20]], mapFeatures);
+
+  geoPathFn = d3.geoPath().projection(projection);
+
+  // Compute centroids and bounding boxes for markers
+  nodeMap = {};
+  mapFeatures.features.forEach(f => {
+    const code = f.properties.USPS;
+    if (code) {
+      const centroid = geoPathFn.centroid(f);
+      const bounds = geoPathFn.bounds(f);
+      const w = bounds[2] - bounds[0]; // width
+      const h = bounds[3] - bounds[1]; // height
+      // Skip states with invalid bounds (e.g. AK, HI — not in contiguous US)
+      if (isNaN(w) || isNaN(h) || w <= 0 || h <= 0) return;
+      const radius = Math.max(w, h) * 0.55 + 8; // slightly larger than bounding box + padding
+      nodeMap[code] = { x: centroid[0], y: centroid[1], radius };
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════
+  // Layer 1 (gFills): State fills — stroke: none. No borders
+  // here; borders live in the stroke layer above.
+  // ═══════════════════════════════════════════════════════
+  fillPaths = gFills.selectAll("path.state-fill")
+    .data(mapFeatures.features)
+    .join("path")
+    .attr("class", "state-fill")
+    .attr("d", geoPathFn)
+    .attr("fill", STATE_FILL_BASE)
+    .attr("stroke", "none")
+    .attr("cursor", "pointer")
+    .on("mouseover", function(event, d) {
+      const code = d.properties.USPS;
+      if (!code) return;
+      const name = stateNames[code] || code;
+      const neighbors = adjMap[code] ? adjMap[code].join(", ") : "—";
+      tooltip.style("opacity", 1)
+        .html(`<strong>${name}</strong> (${code})<br>Neighbors: ${neighbors}`)
+        .style("left", (event.pageX + 14) + "px")
+        .style("top", (event.pageY - 10) + "px");
+      // Darken fill in gFills
+      d3.select(this)
+        .transition().duration(80)
+        .attr("fill", "#2d3748");
+      // Move matching stroke to top of gStrokes (z-index fix)
+      // and brighten its color
+      strokePaths.filter(dd => dd.properties.USPS === code)
+        .raise()
+        .transition().duration(80)
+        .attr("stroke", "#60a5fa")
+        .attr("stroke-width", 2.5);
+    })
+    .on("mousemove", function(event) {
+      tooltip.style("left", (event.pageX + 14) + "px")
+        .style("top", (event.pageY - 10) + "px");
+    })
+    .on("mouseleave", function(event, d) {
+      tooltip.style("opacity", 0);
+      // Restore stroke color/width via applyStateStyles
+      applyStateStyles();
+    });
+
+  // ═══════════════════════════════════════════════════════
+  // Layer 2 (gStrokes): State strokes only — fill: none.
+  // These paths never cover other states; only the boundary
+  // line is drawn. stroke layer is ABOVE fills in DOM order.
+  // ═══════════════════════════════════════════════════════
+  strokePaths = gStrokes.selectAll("path.state-stroke")
+    .data(mapFeatures.features)
+    .join("path")
+    .attr("class", "state-stroke")
+    .attr("d", geoPathFn)
+    .attr("fill", "none")
+    .attr("stroke", STATE_STROKE_BASE)
+    .attr("stroke-width", 1.5)
+    .attr("pointer-events", "none");
+
+  // ═══════════════════════════════════════════════════════
+  // Layer 3 (gOutlines): Start/end state outline overlays.
+  // Rendered AFTER strokes, always above them.
+  // ═══════════════════════════════════════════════════════
+  drawStateOutlines();
+
+  // ═══════════════════════════════════════════════════════
+  // Layer 4 (gLabels): State abbreviation labels — top z-index.
+  // ═══════════════════════════════════════════════════════
+  stateLabels = gLabels.selectAll("text.state-label")
+    .data(mapFeatures.features.filter(f => f.properties.USPS))
+    .join("text")
+    .attr("class", "state-label")
+    .attr("x", d => getLabelCoordinates(d)[0])
+    .attr("y", d => getLabelCoordinates(d)[1])
+    .attr("text-anchor", "middle")
+    .attr("dominant-baseline", "central")
+    .attr("fill", "#94a3b8")
+    .attr("font-size", d => {
+      const code = d.properties.USPS;
+      if (["RI","DE","DC","MD","NJ","CT","MA"].includes(code)) return "7px";
+      return "9px";
+    })
+    .attr("font-weight", 500)
+    .attr("pointer-events", "none")
+    .attr("opacity", 0.6)
+    .text(d => d.properties.USPS);
+
+  updateInfoBar();
+
+  setDebug("Map ready: " + fillPaths.size() + " fills, " + strokePaths.size() + " strokes, " + stateLabels.size() + " labels");
+}
+
+function drawStateOutlines() {
+  if (!mapFeatures || !geoPathFn) return;
+
+  const startCode = getSelectValue("#startState");
+  const endCode = getSelectValue("#endState");
+
+  const targets = [];
+  if (startCode) targets.push({ code: startCode, color: "#fbbf24", dash: "6 3" });
+  if (endCode && endCode !== startCode) targets.push({ code: endCode, color: "#ef4444", dash: "6 3" });
+
+  gOutlines.selectAll("path.state-outline")
+    .data(targets, d => d.code)
+    .join(
+      enter => enter.append("path")
+        .attr("class", "state-outline")
+        .attr("fill", "none")
+        .attr("pointer-events", "none"),
+      update => update,
+      exit => exit.remove()
+    )
+    .attr("d", d => {
+      const f = mapFeatures.features.find(feat => feat.properties.USPS === d.code);
+      return f ? geoPathFn(f) : null;
+    })
+    .attr("stroke", d => d.color)
+    .attr("stroke-width", 3.5)
+    .attr("stroke-dasharray", d => d.dash)
+    .attr("stroke-linejoin", "round")
+    .attr("stroke-linecap", "round");
+
+  gOutlines.raise(); // Ensure the outline layer sits above all fills and normal borders
+}
+
+// ═══════════════════════════════════════════════════════
+// Search Algorithm — interleaved with visualization
+// ═══════════════════════════════════════════════════════
+let path = [];
+let visitedSet = new Set();
+let currentSearchState = null;
+let prevMap = new Map(); // tracks predecessor for each discovered state (like Java's setPrev/getPrev)
+let isPathHighlighting = false; // tracks whether we're animating the final path
+
+function runSearch() {
+  if (isRunning) return;
+
+  const startCode = document.getElementById("startState").value;
+  const endCode = document.getElementById("endState").value;
+
+  if (startCode === endCode) {
+    setStatus("Start and end are the same state!");
+    return;
+  }
+
+  // Reset visual state
+  currentNode = null;
+  discoveredSet = new Set();
+  path = [];
+  pathSet = new Set();
+  pathCodes = [];
+  visitedSet = new Set();
+  prevMap = new Map();
+  isPathHighlighting = false;
+
+  // Apply initial styles instantly (no transitions) so there's no flash
+  // when step() immediately turns the seed blue/orange a moment later
+  applyStateStyles(true);
+  updateLabels(true);
+
+  d3.select("#visitedCount").text("0");
+  d3.select("#currentInfo").text("—");
+  d3.select("#path-list").style("display", "none");
+
+  isRunning = true;
+
+  // Initialize search — seed is marked visited immediately (like Java's begin.visit())
+  visitedSet.add(startCode);
+  discoveredSet.add(startCode);
+  currentSearchState = {
+    endCode,
+    reachable: [startCode],
+  };
+
+  // Visualize seed — turns blue, then immediately pops as current → orange
+  applyStateStyles();
+  updateLabels();
+  step();
+}
+
+async function step() {
+  while (isRunning) {
+    // Pop from reachable collection
+    let curr;
+    if (algoMode === "dfs") {
+      curr = currentSearchState.reachable.pop(); // LIFO = stack
+    } else {
+      curr = currentSearchState.reachable.shift(); // FIFO = queue
+    }
+
+    if (!curr) {
+      currentNode = null;
+      break;
+    }
+
+    // Make current — turns orange
+    currentNode = curr;
+    d3.select("#currentInfo").text(curr);
+    applyStateStyles();
+    updateLabels(true); // Promote current node label immediately
+    await delay(getDelay());
+
+    const neighbors = adjMap[curr] || [];
+
+    for (const nbCode of neighbors) {
+      if (visitedSet.has(nbCode)) continue;
+
+      // Discover — turns blue
+      visitedSet.add(nbCode);
+      discoveredSet.add(nbCode);
+      prevMap.set(nbCode, curr); // like Java's neighbor.setPrev(curr)
+
+      currentSearchState.reachable.push(nbCode);
+      applyStateStyles();
+      updateLabels(true); // Promote discovered node label immediately
+      d3.select("#visitedCount").text(visitedSet.size);
+      d3.select("#currentInfo").text(nbCode);
+      await delay(getDelay());
+
+      // Found end
+      if (nbCode === currentSearchState.endCode) {
+        currentNode = null;
+        applyStateStyles();
+
+        if (searchMode === "path") {
+          // Backtrack from end to start via prev pointers (like Java's buildSolution)
+          const p = [];
+          let cur = nbCode;
+          while (cur != null) {
+            p.push(cur);
+            cur = prevMap.get(cur) ?? null;
+          }
+          path = p.reverse();
+          pathCodes = path;
+        }
+        // Signal that we're completing with a path (for finishSearch and highlightPathVisual)
+        isPathHighlighting = true;
+        finishSearch();
+        return;
+      }
+    }
+
+    // Done exploring — goes back to blue
+    currentNode = null;
+    applyStateStyles();
+    updateLabels(true);
+  }
+
+  finishSearch();
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function finishSearch() {
+  isRunning = false;
+  d3.select("#runBtn").property("disabled", false);
+  d3.select("#currentInfo").text("—");
+
+  if (isPathHighlighting) {
+    setStatus(`Path found! Length: ${path.length} states`);
+    highlightPathVisual();
+  } else {
+    setStatus(`No path found (${algoMode === 'dfs' ? 'Stack' : 'Queue'}).`);
+  }
+}
+
+async function highlightPathVisual() {
+  const pathList = d3.select("#path-list");
+  const pathOl = d3.select("#path-ol");
+  pathOl.selectAll("*").remove();
+
+  pathList.style("display", "block");
+
+  // Reveal path states one-by-one from end → start (backtracking direction),
+  // matching Java's buildSolution which walks prev pointers from end to start.
+  // Each state is prepended to the list so it visually builds from end to start.
+  for (let i = path.length - 1; i >= 0; i--) {
+    // Bail out if reset was clicked during highlighting
+    if (!isPathHighlighting) return;
+
+    pathSet.add(path[i]);
+    applyStateStyles();
+    updateLabels();
+
+    // Prepend the path item to the list and mark it active
+    const li = pathOl.insert("li", ":first-child")
+      .attr("class", "path-node active")
+      .attr("data-idx", i)
+      .text(path[i]);
+
+    // Wait between states — same delay as search steps
+    if (i > 0) {
+      await delay(getDelay());
+    }
+  }
+
+  // Final settle: remove the active highlight from all list items
+  if (isPathHighlighting) {
+    pathOl.selectAll(".path-node").classed("active", false);
+  }
+}
+
+function updateLabels(forceInstant) {
+  if (!stateLabels) return;
+  const sel = (forceInstant || isRunning) ? stateLabels : stateLabels.transition().duration(200);
+
+  sel
+    .attr("fill", d => {
+      const c = d.properties.USPS;
+      if (pathSet.has(c)) return "#22c55e";      // Path green
+      if (c === currentNode) return "#ffffff";   // Current node bright white
+      if (discoveredSet.has(c)) return "#f8fafc"; // Visited node crisp white-blue
+      return "#94a3b8";                          // Unvisited muted slate
+    })
+    .attr("opacity", d => {
+      const c = d.properties.USPS;
+      if (pathSet.has(c) || c === currentNode || discoveredSet.has(c)) return 1.0;
+      return 0.55;
+    })
+    .attr("font-weight", d => {
+      const c = d.properties.USPS;
+      return (pathSet.has(c) || c === currentNode || discoveredSet.has(c)) ? 700 : 500;
+    });
+
+  // Raise visited and current labels to the top of the label layer
+  gLabels.selectAll("text.state-label")
+    .filter(d => discoveredSet.has(d.properties.USPS) || d.properties.USPS === currentNode || pathSet.has(d.properties.USPS))
+    .raise();
+
+  // Keep the entire label layer on top of all SVG groups
+  gLabels.raise();
+}
+
+// ═══════════════════════════════════════════════════════
+// Reset
+// ═══════════════════════════════════════════════════════
+function resetAll() {
+  currentNode = null;
+  discoveredSet = new Set();
+  path = [];
+  pathSet = new Set();
+  pathCodes = [];
+  visitedSet = new Set();
+  isPathHighlighting = false;
+
+  applyStateStyles(true); // instant — no transition flash on reset
+  updateLabels(true);
+  drawStateOutlines(); // ensure outlines are redrawn after reset
+
+  d3.select("#visitedCount").text("0");
+  d3.select("#currentInfo").text("—");
+  d3.select("#path-list").style("display", "none");
+}
+
+function reset() {
+  if (isRunning) {
+    isRunning = false;
+    d3.select("#runBtn").property("disabled", false);
+  }
+  // Stop the path highlight in progress (bug fix)
+  isPathHighlighting = false;
+  resetAll();
+  setStatus("Ready");
+}
+
+function setStatus(text) {
+  d3.select("#status").text(text);
+}
+
+// ═══════════════════════════════════════════════════════
+// Event Bindings
+// ═══════════════════════════════════════════════════════
+startSelect.on("change", () => { drawStateOutlines(); updateInfoBar(); });
+endSelect.on("change", () => { drawStateOutlines(); updateInfoBar(); });
+d3.select("#runBtn").on("click", runSearch);
+d3.select("#resetBtn").on("click", reset);
+
+window.addEventListener("resize", () => {
+  // Simple resize — reload would reproject properly but we skip for now
+});
+
+// ═══════════════════════════════════════════════════════
+// Initialize
+// ═══════════════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>

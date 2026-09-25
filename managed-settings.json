@@ -1,0 +1,9 @@
+{
+    "forceLoginMethod": "gateway",
+    "forceLoginGatewayUrl": "https://chateaugay.stlawu.local",
+    "env": {
+        "ANTHROPIC_BASE_URL": "https://chateaugay.stlawu.local",
+        "ANTHROPIC_MODEL": "Qwen/Qwen3.6-35B-A3B",
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+    }
+}
