@@ -438,12 +438,44 @@ glowMerge.append("feMergeNode").attr("in", "SourceGraphic");
 const g = svg.append("g");
 
 // ═══════════════════════════════════════════════════════
+// Arrowhead marker — grey (exploratory arrows)
+const markerDef = defs.append("marker")
+  .attr("id", "arrowhead")
+  .attr("viewBox", "0 0 10 10")
+  .attr("refX", 7)
+  .attr("refY", 5)
+  .attr("markerWidth", 6)
+  .attr("markerHeight", 6)
+  .attr("orient", "auto-start-reverse");
+markerDef.append("path")
+  .attr("d", "M 0 1.5 L 8 5 L 0 8.5 z")
+  .attr("fill", "#94a3b8");
+
+// Arrowhead marker — white (final path arrows)
+const markerPathDef = defs.append("marker")
+  .attr("id", "arrowhead-path")
+  .attr("viewBox", "0 0 10 10")
+  .attr("refX", 7)
+  .attr("refY", 5)
+  .attr("markerWidth", 7)
+  .attr("markerHeight", 7)
+  .attr("orient", "auto-start-reverse");
+markerPathDef.append("path")
+  .attr("d", "M 0 1.5 L 8 5 L 0 8.5 z")
+  .attr("fill", "#ffffff");
+
+// ═══════════════════════════════════════════════════════
+// 6 explicit SVG layer groups — DOM order = z-index
+// ═══════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════
 // 5 explicit SVG layer groups — DOM order = z-index
 // ═══════════════════════════════════════════════════════
 const gFills    = g.append("g").attr("id", "layer-fills");
 const gStrokes  = g.append("g").attr("id", "layer-strokes");
 const gHover    = g.append("g").attr("id", "layer-hover");
 const gOutlines = g.append("g").attr("id", "layer-outlines");
+const gArrows   = g.append("g").attr("id", "layer-arrows");
 const gLabels   = g.append("g").attr("id", "layer-labels");
 
 // Zoom transforms the root group g, which contains all layers
@@ -467,7 +499,8 @@ let mapFeatures = null;
 let geoPathFn = null; // d3.geoPath function
 let fillPaths = null;  // Layer 1: state fills only (no stroke) — bottom z-index
 let strokePaths = null; // Layer 2: state strokes only (no fill) — above fills
-let stateLabels = null; // Layer 5: labels — top z-index
+let stateLabels = null; // Layer 6: labels — top z-index
+let arrowPaths = null;  // Layer 5: search arrows — above outlines, below labels
 let nodeMap = {}; // code → {x, y} centroids, radius
 let pathCodes = []; // current search path
 let isRunning = false;
@@ -811,6 +844,108 @@ function drawStateOutlines() {
 }
 
 // ═══════════════════════════════════════════════════════
+// Search arrow: from discovered state → predecessor (current state)
+// Shows the prev-pointer chain used for backtracking.
+// Uses label coordinates for consistent positioning with state text.
+// Shortens the end of the line so the arrowhead stops cleanly
+// outside the target label without overlapping it.
+// ═══════════════════════════════════════════════════════
+function drawSearchArrow(fromCode, toCode) {
+  const fromFeature = mapFeatures.features.find(f => f.properties.USPS === fromCode);
+  const toFeature = mapFeatures.features.find(f => f.properties.USPS === toCode);
+  if (!fromFeature || !toFeature) return;
+
+  const p1 = getLabelCoordinates(fromFeature);
+  const p2 = getLabelCoordinates(toFeature);
+
+  const dx = p2[0] - p1[0];
+  const dy = p2[1] - p1[1];
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) return;
+
+  const offset = 14; // pixels to leave from target label center
+  const x2 = p2[0] - (dx / dist) * Math.min(offset, dist * 0.4);
+  const y2 = p2[1] - (dy / dist) * Math.min(offset, dist * 0.4);
+
+  const edgeKey = `${fromCode}->${toCode}`;
+  if (!gArrows.select(`line[data-edge="${edgeKey}"]`).empty()) return;
+
+  gArrows.append("line")
+    .attr("class", "search-arrow")
+    .attr("data-edge", edgeKey)
+    .attr("data-from", fromCode)
+    .attr("data-to", toCode)
+    .attr("x1", p1[0])
+    .attr("y1", p1[1])
+    .attr("x2", x2)
+    .attr("y2", y2)
+    .attr("stroke", "#94a3b8")
+    .attr("stroke-width", 2)
+    .attr("opacity", 0.7)
+    .attr("marker-end", "url(#arrowhead)");
+}
+
+// ═══════════════════════════════════════════════════════
+// Flip an exploratory arrow to show the final solution direction.
+// During exploration, arrows point discovered → predecessor (backwards).
+// During path reveal, flip them to predecessor → state (forward along solution).
+// ═══════════════════════════════════════════════════════
+function highlightPathArrow(fromCode, toCode) {
+  // During path reveal, fromCode = path[i], toCode = path[i-1].
+  // path[i-1] is the predecessor of path[i], so:
+  //   - The exploratory arrow was drawn: drawSearchArrow(fromCode, toCode)
+  //     → edgeKey = `${fromCode}->${toCode}` (fromCode → toCode, BACKWARD)
+  //   - We remove that backward arrow and draw a new forward one.
+  //   - The forward arrow goes: toCode → fromCode (toCode = predecessor → fromCode = state)
+
+  // Remove the old backward exploratory arrow
+  const oldEdgeKey = `${fromCode}->${toCode}`;
+  const oldArrow = gArrows.select(`line[data-edge="${oldEdgeKey}"]`);
+  if (!oldArrow.empty()) {
+    oldArrow.remove();
+  }
+
+  // Draw the flipped arrow (forward along solution: toCode → fromCode)
+  const forwardEdgeKey = `${toCode}->${fromCode}`;
+  const fromFeature = mapFeatures.features.find(f => f.properties.USPS === toCode);
+  const toFeature = mapFeatures.features.find(f => f.properties.USPS === fromCode);
+  if (!fromFeature || !toFeature) return;
+
+  const p1 = getLabelCoordinates(fromFeature);
+  const p2 = getLabelCoordinates(toFeature);
+
+  const dx = p2[0] - p1[0];
+  const dy = p2[1] - p1[1];
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) return;
+
+  const offset = 14;
+  const x2 = p2[0] - (dx / dist) * Math.min(offset, dist * 0.4);
+  const y2 = p2[1] - (dy / dist) * Math.min(offset, dist * 0.4);
+
+  const newArrow = gArrows.append("line")
+    .attr("class", "search-arrow path-arrow")
+    .attr("data-edge", forwardEdgeKey)
+    .attr("data-from", toCode)
+    .attr("data-to", fromCode)
+    .attr("x1", p1[0])
+    .attr("y1", p1[1])
+    .attr("x2", x2)
+    .attr("y2", y2)
+    .attr("stroke", "#ffffff")
+    .attr("stroke-width", 3.5)
+    .attr("opacity", 1)
+    .attr("marker-end", "url(#arrowhead-path)");
+
+  newArrow.raise(); // Raise above any remaining exploratory arrows
+}
+
+function clearSearchArrows() {
+  if (arrowPaths) arrowPaths.remove();
+  gArrows.selectAll("line.search-arrow").remove();
+}
+
+// ═══════════════════════════════════════════════════════
 // Search Algorithm — interleaved with visualization
 // ═══════════════════════════════════════════════════════
 let path = [];
@@ -830,7 +965,8 @@ function runSearch() {
     return;
   }
 
-  // Reset visual state
+  // Reset visual state and clear old arrows (bug fix: previous search arrows
+  // otherwise leak into the new search when user doesn't press Reset first)
   currentNode = null;
   discoveredSet = new Set();
   path = [];
@@ -839,6 +975,7 @@ function runSearch() {
   visitedSet = new Set();
   prevMap = new Map();
   isPathHighlighting = false;
+  clearSearchArrows();
 
   // Apply initial styles instantly (no transitions) so there's no flash
   // when step() immediately turns the seed blue/orange a moment later
@@ -850,6 +987,7 @@ function runSearch() {
   d3.select("#path-list").style("display", "none");
 
   isRunning = true;
+  d3.select("#runBtn").property("disabled", true);
 
   // Initialize search — seed is marked visited immediately (like Java's begin.visit())
   visitedSet.add(startCode);
@@ -886,10 +1024,12 @@ async function step() {
     applyStateStyles();
     updateLabels(true); // Promote current node label immediately
     await delay(getDelay());
+    if (!isRunning) { currentNode = null; finishSearch(); return; }
 
     const neighbors = adjMap[curr] || [];
 
     for (const nbCode of neighbors) {
+      if (!isRunning) break; // BUG3: bail out mid-neighbor-loop on reset
       if (visitedSet.has(nbCode)) continue;
 
       // Discover — turns blue
@@ -899,10 +1039,13 @@ async function step() {
 
       currentSearchState.reachable.push(nbCode);
       applyStateStyles();
+      // Draw backtracking arrow in path mode: from discovered → predecessor
+      if (searchMode === "path") drawSearchArrow(nbCode, curr);
       updateLabels(true); // Promote discovered node label immediately
       d3.select("#visitedCount").text(visitedSet.size);
       d3.select("#currentInfo").text(nbCode);
       await delay(getDelay());
+      if (!isRunning) break; // BUG3: bail out after delay on reset
 
       // Found end
       if (nbCode === currentSearchState.endCode) {
@@ -942,7 +1085,11 @@ function delay(ms) {
 
 function finishSearch() {
   isRunning = false;
-  d3.select("#runBtn").property("disabled", false);
+  // Button re-enable is handled by reset() if that called us;
+  // otherwise the normal completion path handles it.
+  if (!isPathHighlighting) {
+    d3.select("#runBtn").property("disabled", false);
+  }
   d3.select("#currentInfo").text("—");
 
   if (isPathHighlighting) {
@@ -971,6 +1118,11 @@ async function highlightPathVisual() {
     applyStateStyles();
     updateLabels();
 
+    // Highlight the arrow from path[i] to its predecessor (if one exists)
+    if (i > 0 && searchMode === "path") {
+      highlightPathArrow(path[i], path[i - 1]);
+    }
+
     // Prepend the path item to the list and mark it active
     const li = pathOl.insert("li", ":first-child")
       .attr("class", "path-node active")
@@ -986,6 +1138,11 @@ async function highlightPathVisual() {
   // Final settle: remove the active highlight from all list items
   if (isPathHighlighting) {
     pathOl.selectAll(".path-node").classed("active", false);
+  }
+
+  // Re-enable the run button after path highlighting completes naturally
+  if (isPathHighlighting) {
+    d3.select("#runBtn").property("disabled", false);
   }
 }
 
@@ -1016,7 +1173,8 @@ function updateLabels(forceInstant) {
     .filter(d => discoveredSet.has(d.properties.USPS) || d.properties.USPS === currentNode || pathSet.has(d.properties.USPS))
     .raise();
 
-  // Keep the entire label layer on top of all SVG groups
+  // Keep the label layer above arrows, and arrows above outlines
+  gArrows.raise();
   gLabels.raise();
 }
 
@@ -1035,6 +1193,7 @@ function resetAll() {
   applyStateStyles(true); // instant — no transition flash on reset
   updateLabels(true);
   drawStateOutlines(); // ensure outlines are redrawn after reset
+  clearSearchArrows(); // remove all search arrows
 
   d3.select("#visitedCount").text("0");
   d3.select("#currentInfo").text("—");
